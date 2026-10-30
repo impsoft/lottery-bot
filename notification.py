@@ -162,6 +162,22 @@ class Notification:
         win_num = set(draw["numbers"] if draw else winning.get("win_num", []))
         bonus = draw["bonus"] if draw else None
 
+        if not win_num:
+            lines = [
+                f"`{line['label']}`  " + " ".join(ball(n) for n in line["numbers"])
+                for line in winning.get("lotto_details", [])
+            ]
+            self._send({
+                "title": f"🎱 로또 6/45 · {winning['round']}회 — 추첨 전 ⏳",
+                "color": _COLOR_INFO,
+                "description": "\n".join(lines) or "상세 정보를 불러오지 못했습니다.",
+                "fields": [
+                    {"name": "추첨", "value": _when(next_weekday(5, 20, 35)), "inline": True},
+                    {"name": "잔액", "value": str(balance), "inline": True},
+                ],
+            })
+            return
+
         description = []
         if draw:
             description.append(
