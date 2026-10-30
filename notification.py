@@ -29,6 +29,18 @@ _COLOR_ERROR = 0xEF4444
 
 _WIN720_TAIL_MATCH = {1: 6, 2: 6, 3: 5, 4: 4, 5: 3, 6: 2, 7: 1}
 _IMAGE_NAME = "numbers.png"
+_EMPTY_REASON_HINT = (
+    "구매 페이지가 정상 응답하지 않았습니다.\n"
+    "동행복권에 직접 로그인해서 **비밀번호 변경 안내** 같은 화면이 뜨는지 확인해 주세요. "
+    "비밀번호를 바꿨다면 GitHub Secrets 의 `PASSWORD` 도 바꿔야 합니다."
+)
+
+
+def _failure_reason(msg) -> str:
+    msg = (msg or "").strip()
+    if not msg or msg == "Unknown Error":
+        return _EMPTY_REASON_HINT
+    return f"`{msg}`"
 
 
 def ball(n: int) -> str:
@@ -107,7 +119,7 @@ class Notification:
             self._send({
                 "title": "🎱 로또 6/45 구매 실패",
                 "color": _COLOR_ERROR,
-                "description": f"## ❌ 구매 실패\n`{result.get('resultMsg', 'Unknown Error')}`",
+                "description": f"## ❌ 구매 실패\n{_failure_reason(result.get('resultMsg'))}",
                 "fields": [{"name": "잔액", "value": str(balance), "inline": True}],
             })
             return
@@ -139,7 +151,7 @@ class Notification:
             self._send({
                 "title": "🎟️ 연금복권 720+ 구매 실패",
                 "color": _COLOR_ERROR,
-                "description": f"## ❌ 구매 실패\n`{body.get('resultMsg', 'Unknown Error')}`",
+                "description": f"## ❌ 구매 실패\n{_failure_reason(body.get('resultMsg'))}",
                 "fields": [{"name": "잔액", "value": str(balance), "inline": True}],
             })
             return

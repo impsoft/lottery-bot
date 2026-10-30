@@ -3,6 +3,12 @@ on:
   schedule:
     - cron: 37 21 * * 1 # every Tuesday 06:37 (KST). 정각은 GitHub 스케줄 지연이 심해 피함
   workflow_dispatch:
+    inputs:
+      target:
+        description: '실행 대상 (buy=전부)'
+        type: choice
+        options: [buy, buy_lotto, buy_win720]
+        default: buy
 
 permissions:
   contents: read
@@ -22,7 +28,7 @@ jobs:
       - run: pip install -r requirements.txt
       
       - name: Run Scripts
-        run: make buy # or use 'make buy_lotto' / 'make buy_win720' for granular purchase
+        run: make ${{ inputs.target || 'buy' }} # or use 'make buy_lotto' / 'make buy_win720' for granular purchase
         env:
           USERNAME: ${{ secrets.USERNAME }}
           PASSWORD: ${{ secrets.PASSWORD }}

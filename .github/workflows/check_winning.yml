@@ -3,6 +3,12 @@ on:
   schedule:
     - cron: 37 13 * * 6 # every Saturday 22:37 (KST). 정각은 GitHub 스케줄 지연이 심해 피함
   workflow_dispatch:
+    inputs:
+      target:
+        description: '실행 대상 (check=전부)'
+        type: choice
+        options: [check, check_lotto, check_win720]
+        default: check
 
 permissions:
   contents: read
@@ -22,7 +28,7 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Run Scripts
-        run: make check # or use 'make check_lotto' / 'make check_win720' for granular check
+        run: make ${{ inputs.target || 'check' }} # or use 'make check_lotto' / 'make check_win720' for granular check
         env:
           USERNAME: ${{ secrets.USERNAME }}
           PASSWORD: ${{ secrets.PASSWORD }}

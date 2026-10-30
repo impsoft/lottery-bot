@@ -25,4 +25,6 @@ Settings - Secrets and variables - Actions - **Variables** 에 `STRATEGY` 를 �
 
 # 스케줄 자동 비활성화 방지
 
+수동 실행(Actions → Run workflow) 시 `target` 으로 로또만(`buy_lotto`)/연금복권만(`buy_win720`) 고를 수 있습니다.
+
 GitHub 는 public 저장소에 60일간 활동이 없으면 스케줄 워크플로를 끕니다. 두 워크플로는 실행이 끝날 때마다 `enable` API 를 호출해 서로를 다시 활성화합니다 (`permissions: actions: write`).
