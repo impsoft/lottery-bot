@@ -11,6 +11,10 @@ from HttpClient import HttpClientSingleton
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
+class LoginError(Exception):
+    """로그인 요청은 갔지만 로그인 상태가 아님 (비밀번호 오류, 비밀번호 변경 안내 등). 재시도하면 계정이 잠길 수 있다."""
+
+
 class AuthController:
     _REQ_HEADERS = {
         "User-Agent": USER_AGENT,
@@ -68,7 +72,8 @@ class AuthController:
                 }
 
                 # 5. Execute Login
-                self._try_login(headers, data)
+                res = self._try_login(headers, data)
+                self._verify_login(res)
                 return # Success
                 
             except requests.RequestException as e:
@@ -78,6 +83,19 @@ class AuthController:
                      raise
                 print(f"[Retry] Login failed ({attempt+1}/{max_retries}): {e}. Retrying...")
         
+    def _verify_login(self, login_res: requests.Response) -> None:
+        # 로그인 안 된 세션은 마이페이지가 401 을 준다
+        try:
+            self.http_client.get("https://www.dhlottery.co.kr/mypage/home", headers=self._REQ_HEADERS)
+        except requests.HTTPError as e:
+            if e.response is None or e.response.status_code not in (401, 403):
+                raise
+            path = requests.utils.urlparse(login_res.url).path
+            raise LoginError(
+                f"로그인이 되지 않았습니다 (로그인 응답 페이지: {path}). "
+                "아이디/비밀번호가 맞는지, 동행복권 사이트에 비밀번호 변경 안내가 뜨는지 확인해 주세요."
+            ) from e
+
     def add_auth_cred_to_headers(self, headers: dict) -> str:
         assert isinstance(headers, dict)
 

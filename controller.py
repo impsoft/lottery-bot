@@ -48,6 +48,8 @@ def _setup_and_login(fresh: bool = False):
         try:
             auth_ctrl.login(username, password)
             break
+        except auth.LoginError:
+            raise
         except Exception as e:
             if attempt == _LOGIN_ROUNDS - 1:
                 raise
