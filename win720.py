@@ -133,7 +133,7 @@ class Win720:
             "q": requests.utils.quote(self._encText(payload))
         }
 
-        max_retries = 5
+        max_retries = 10
         for attempt in range(max_retries):
             try:
                 res = self.http_client.post(
@@ -145,8 +145,8 @@ class Win720:
                 break
             except requests.RequestException as e:
                 if attempt < max_retries - 1:
-                    logger.warning(f"[Retry] makeAutoNo connection failed ({attempt+1}/{max_retries}): {e}. Retrying in 2s...")
-                    time.sleep(2)
+                    logger.warning(f"[Retry] makeAutoNo connection failed ({attempt+1}/{max_retries}): {e}. Retrying in 5s...")
+                    time.sleep(5)
                 else:
                     logger.error(f"[Error] makeAutoNo connection failed after {max_retries} attempts: {e}")
                     raise
@@ -161,7 +161,7 @@ class Win720:
             "q": requests.utils.quote(self._encText(payload))
         }
 
-        max_retries = 5
+        max_retries = 10
         for attempt in range(max_retries):
             try:
                 res = self.http_client.post(
@@ -173,8 +173,8 @@ class Win720:
                 break
             except requests.RequestException as e:
                 if attempt < max_retries - 1:
-                    logger.warning(f"[Retry] makeOrderNo connection failed ({attempt+1}/{max_retries}): {e}. Retrying in 2s...")
-                    time.sleep(2)
+                    logger.warning(f"[Retry] makeOrderNo connection failed ({attempt+1}/{max_retries}): {e}. Retrying in 5s...")
+                    time.sleep(5)
                 else:
                     logger.error(f"[Error] makeOrderNo connection failed after {max_retries} attempts: {e}")
                     raise
@@ -341,55 +341,18 @@ class Win720:
                                         except (ValueError, TypeError):
                                             rank = 0
                                             
-                                    status = "0등" if rank == 0 else f"{rank}등"
+                                    status = "낙첨" if rank == 0 else f"{rank}등"
                                     
                                     if ":" in info_cn:
-                                        parts = info_cn.split(":")
-                                        group = parts[0]
-                                        number_str = parts[1]
-                                        
-                                        hl_count = 0 
-                                        hl_group = False
-                                        
-                                        if rank == 1:
-                                            hl_count = 6
-                                            hl_group = True
-                                        elif rank == 2:
-                                            hl_count = 6
-                                        elif rank == 3:
-                                            hl_count = 5
-                                        elif rank == 4:
-                                            hl_count = 4
-                                        elif rank == 5:
-                                            hl_count = 3
-                                        elif rank == 6:
-                                            hl_count = 2
-                                        elif rank == 7:
-                                            hl_count = 1
-                                        
-                                        formatted_chars = []
-                                        digits = list(number_str)
-                                        L = len(digits)
-                                        
-                                        for idx, digit in enumerate(digits):
-                                            if idx >= (L - hl_count):
-                                                formatted_chars.append(f"[{digit}]")
-                                            else:
-                                                formatted_chars.append(f" {digit} ")
-                                        
-                                        formatted_num = " ".join(formatted_chars)
-                                        
-                                        label = f"{group}조"
-                                        
-                                        result_str = formatted_num
+                                        group, number = info_cn.split(":", 1)
                                     else:
-                                        label = "?"
-                                        result_str = info_cn
-                                    
+                                        group, number = "?", info_cn
                                     
                                     win720_details.append({
                                         "label": label,
-                                        "result": result_str,
+                                        "group": group,
+                                        "number": number,
+                                        "rank": rank,
                                         "status": status
                                     })
                                     

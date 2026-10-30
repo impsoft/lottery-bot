@@ -49,7 +49,8 @@ class Lotto645:
         self, 
         auth_ctrl: auth.AuthController, 
         cnt: int, 
-        mode: Lotto645Mode
+        mode: Lotto645Mode,
+        numbers: list = None
     ) -> dict:
         assert isinstance(auth_ctrl, auth.AuthController)
         assert isinstance(cnt, int) and 1 <= cnt <= 5
@@ -62,7 +63,7 @@ class Lotto645:
         data = (
             self._generate_body_for_auto_mode(cnt, requirements)
             if mode == Lotto645Mode.AUTO
-            else self._generate_body_for_manual(cnt)
+            else self._generate_body_for_manual(cnt, requirements, numbers)
         )
 
         body = self._try_buying(headers, data)
@@ -77,25 +78,33 @@ class Lotto645:
     def _generate_body_for_auto_mode(self, cnt: int, requirements: list) -> dict:
         assert isinstance(cnt, int) and 1 <= cnt <= 5
 
+        slots = [
+            {"genType": "0", "arrGameChoiceNum": None, "alpabet": slot}
+            for slot in common.SLOTS[:cnt]
+        ]
+        return self._generate_body(cnt, requirements, slots)
+
+    def _generate_body_for_manual(self, cnt: int, requirements: list, numbers: list) -> dict:
+        assert isinstance(cnt, int) and 1 <= cnt <= 5
+        assert isinstance(numbers, list) and len(numbers) == cnt
+
+        slots = [
+            {"genType": "1", "arrGameChoiceNum": ",".join(str(n) for n in sorted(nums)), "alpabet": slot}
+            for slot, nums in zip(common.SLOTS, numbers)
+        ]
+        return self._generate_body(cnt, requirements, slots)
+
+    def _generate_body(self, cnt: int, requirements: list, slots: list) -> dict:
         return {
             "round": requirements[3],
             "direct": requirements[0], 
             "nBuyAmount": str(1000 * cnt),
-            "param": json.dumps(
-                [
-                    {"genType": "0", "arrGameChoiceNum": None, "alpabet": slot}
-                    for slot in common.SLOTS[:cnt]
-                ]
-            ),
+            "param": json.dumps(slots),
             'ROUND_DRAW_DATE' : requirements[1],
             'WAMT_PAY_TLMT_END_DT' : requirements[2],
             "gameCnt": cnt,
             "saleMdaDcd": "10"
         }
-
-    def _generate_body_for_manual(self, cnt: int) -> dict:
-        assert isinstance(cnt, int) and 1 <= cnt <= 5
-        raise NotImplementedError()
 
     def _getRequirements(self, headers: dict) -> list:
         headers["Referer"] = "https://ol.dhlottery.co.kr/olotto/game/game645.do"
@@ -106,7 +115,7 @@ class Lotto645:
         headers["Sec-Fetch-Dest"] = "empty"
 
         # Retry logic for egovUserReadySocket.json
-        max_retries = 5
+        max_retries = 10
         for attempt in range(max_retries):
             try:
                 res = self.http_client.post(
@@ -117,8 +126,8 @@ class Lotto645:
                 break # Success
             except requests.RequestException as e:
                 if attempt < max_retries - 1:
-                    logger.warning(f"[Retry] ReadySocket connection failed ({attempt+1}/{max_retries}): {e}. Retrying in 2s...")
-                    time.sleep(2)
+                    logger.warning(f"[Retry] ReadySocket connection failed ({attempt+1}/{max_retries}): {e}. Retrying in 5s...")
+                    time.sleep(5)
                 else:
                     logger.error(f"[Error] ReadySocket connection failed after {max_retries} attempts: {e}")
                     raise
@@ -332,20 +341,15 @@ class Lotto645:
                         status = "낙첨" if rank == "0" else f"{rank}등"
                         
                         nums = game.get("num", [])
-                        formatted_nums = []
-                        for num in nums:
-                            if num in win_num:
-                                formatted_nums.append(f"✨{num}")
-                            else:
-                                formatted_nums.append(str(num))
-                        
+
                         lotto_details.append({
                             "label": label,
                             "status": status,
-                            "result": formatted_nums
+                            "numbers": [int(num) for num in nums]
                         })
-                    
+
                     result_data["lotto_details"] = lotto_details
+                    result_data["win_num"] = [int(num) for num in win_num]
 
                 except (requests.RequestException, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
                     logger.error(f"[Error] Detail parse error (url={detail_url}, params={detail_params}): {e}")
