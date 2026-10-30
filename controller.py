@@ -131,23 +131,34 @@ def _run(notify: notification.Notification, title: str, job) -> None:
         notify.failed = True
         notify.send_error_message(title, e)
 
+# Actions 로그는 public 이라 회차/장수/성공 여부만 남긴다 (잔액·당첨금·번호 제외)
 def _lotto_buy(notify):
     count = int(os.environ.get('COUNT'))
     mode = os.environ.get('STRATEGY', 'smart')
     auth_ctrl, _ = _setup_and_login()
-    notify.send_lotto_buying_message(buy_lotto645(auth_ctrl, count, mode))
+    response = buy_lotto645(auth_ctrl, count, mode)
+    result = response.get('result', {})
+    logger.info(f"[Result] 로또 구매: {result.get('resultMsg')} / {result.get('buyRound', '?')}회 {len(result.get('arrGameChoiceNum') or [])}게임")
+    notify.send_lotto_buying_message(response)
 
 def _win720_buy(notify):
     auth_ctrl, username = _setup_and_login(fresh=True)
-    notify.send_win720_buying_message(buy_win720(auth_ctrl, username))
+    response = buy_win720(auth_ctrl, username)
+    tickets = [t for t in (response.get('saleTicket') or '').split(',') if t.strip()]
+    logger.info(f"[Result] 연금복권 구매: code={response.get('resultCode')} / {response.get('round', '?')}회 {len(tickets)}장")
+    notify.send_win720_buying_message(response)
 
 def _lotto_check(notify):
     auth_ctrl, _ = _setup_and_login()
-    notify.send_lotto_winning_message(check_winning_lotto645(auth_ctrl))
+    item = check_winning_lotto645(auth_ctrl)
+    logger.info(f"[Result] 로또 내역: {item.get('round', '없음')}회 {len(item.get('lotto_details', []))}게임, 추첨 {'완료' if item.get('draw') else '전/조회실패'}")
+    notify.send_lotto_winning_message(item)
 
 def _win720_check(notify):
     auth_ctrl, _ = _setup_and_login()
-    notify.send_win720_winning_message(check_winning_win720(auth_ctrl))
+    item = check_winning_win720(auth_ctrl)
+    logger.info(f"[Result] 연금복권 내역: {item.get('round', '없음')}회 {len(item.get('win720_details', []))}장, 추첨 {'완료' if item.get('draw') else '전/조회실패'}")
+    notify.send_win720_winning_message(item)
 
 def run():
     if len(sys.argv) < 2:
