@@ -1,10 +1,16 @@
 import datetime
+import json
 import logging
 import re
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+try:
+    import render
+except ImportError:  # Pillow 가 없으면 이미지 없이 텍스트로만 보낸다
+    render = None
 
 KST = datetime.timezone(datetime.timedelta(hours=9))
 
@@ -22,6 +28,7 @@ _COLOR_BIG = 0xF59E0B
 _COLOR_ERROR = 0xEF4444
 
 _WIN720_TAIL_MATCH = {1: 6, 2: 6, 3: 5, 4: 4, 5: 3, 6: 2, 7: 1}
+_IMAGE_NAME = "numbers.png"
 
 
 def ball(n: int) -> str:
@@ -69,6 +76,22 @@ def _rank_color(best_rank: int, small: int, mid: int) -> int:
     return _COLOR_SMALL
 
 
+def _headline(best_rank: int, money: str) -> str:
+    if best_rank:
+        return f"## 🎉 {best_rank}등 당첨 · {money}"
+    return "## 🫠 다음 기회에"
+
+
+def _render(fn, *args, **kwargs):
+    if render is None:
+        return None
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        logger.warning(f"[Warning] Image render failed: {e}")
+        return None
+
+
 class Notification:
     def __init__(self, webhook_urls: list):
         self.webhook_urls = [url for url in webhook_urls if url]
@@ -84,27 +107,30 @@ class Notification:
             self._send({
                 "title": "🎱 로또 6/45 구매 실패",
                 "color": _COLOR_ERROR,
-                "description": f"`{result.get('resultMsg', 'Unknown Error')}`",
+                "description": f"## ❌ 구매 실패\n`{result.get('resultMsg', 'Unknown Error')}`",
                 "fields": [{"name": "잔액", "value": str(balance), "inline": True}],
             })
             return
 
-        lines = []
+        rows = []
         for line in result.get("arrGameChoiceNum", []):
             parts = line[:-1].split("|")
-            nums = [int(n) for n in parts[1:]]
-            lines.append(f"`{parts[0]}`  " + " ".join(ball(n) for n in nums))
+            rows.append((parts[0], [int(n) for n in parts[1:]]))
+
+        image = _render(render.lotto, rows) if render else None
+        description = [f"## ⏰ {_when(next_weekday(5, 20, 35))} 추첨"]
+        if not image:
+            description += [f"`{label}`  " + " ".join(ball(n) for n in nums) for label, nums in rows]
 
         self._send({
             "title": f"🎱 로또 6/45 · {result.get('buyRound', '?')}회 구매 완료",
             "color": _COLOR_OK,
-            "description": "\n".join(lines),
+            "description": "\n".join(description),
             "fields": [
-                {"name": "추첨", "value": _when(next_weekday(5, 20, 35)), "inline": True},
                 {"name": "잔액", "value": str(balance), "inline": True},
-                {"name": "번호 선택", "value": body.get("strategy_note", "🎲 자동"), "inline": False},
+                {"name": "번호 선택", "value": body.get("strategy_note", "🎲 자동"), "inline": True},
             ],
-        })
+        }, image)
 
     def send_win720_buying_message(self, body: dict) -> None:
         balance = body.get("balance", "확인불가")
@@ -113,7 +139,7 @@ class Notification:
             self._send({
                 "title": "🎟️ 연금복권 720+ 구매 실패",
                 "color": _COLOR_ERROR,
-                "description": f"`{body.get('resultMsg', 'Unknown Error')}`",
+                "description": f"## ❌ 구매 실패\n`{body.get('resultMsg', 'Unknown Error')}`",
                 "fields": [{"name": "잔액", "value": str(balance), "inline": True}],
             })
             return
@@ -127,23 +153,28 @@ class Notification:
 
         tickets = [t.strip() for t in (body.get("saleTicket") or "").split(",") if t.strip()]
         numbers = {t[1:] for t in tickets}
+        description = [f"## ⏰ {_when(next_weekday(3, 19, 5))} 추첨"]
+        image = None
         if not tickets:
-            description = "번호 정보 없음"
+            description.append("번호 정보 없음")
         elif len(numbers) == 1:
             groups = sorted(t[0] for t in tickets)
-            description = f"{keycaps(numbers.pop())}\n`{groups[0]}~{groups[-1]}조` 모든 조 구매"
+            number = numbers.pop()
+            description.append(f"{groups[0]}~{groups[-1]}조 모든 조 구매")
+            image = _render(render.win720, [(f"{groups[0]}-{groups[-1]}", number)]) if render else None
+            if not image:
+                description.append(keycaps(number))
         else:
-            description = "\n".join(f"`{t[0]}조`  {keycaps(t[1:])}" for t in tickets)
+            image = _render(render.win720, [(t[0], t[1:]) for t in tickets]) if render else None
+            if not image:
+                description += [f"`{t[0]}조`  {keycaps(t[1:])}" for t in tickets]
 
         self._send({
             "title": f"🎟️ 연금복권 720+ · {win720_round}회 구매 완료",
             "color": _COLOR_OK,
-            "description": description,
-            "fields": [
-                {"name": "추첨", "value": _when(next_weekday(3, 19, 5)), "inline": True},
-                {"name": "잔액", "value": str(balance), "inline": True},
-            ],
-        })
+            "description": "\n".join(description),
+            "fields": [{"name": "잔액", "value": str(balance), "inline": True}],
+        }, image)
 
     # ── 당첨 확인 ────────────────────────────────────────
 
@@ -153,60 +184,48 @@ class Notification:
             self._send({
                 "title": "🎱 로또 6/45 결과",
                 "color": _COLOR_NONE,
-                "description": "이번 주 구매 내역이 없습니다.",
+                "description": "## 📭 이번 주 구매 내역 없음",
                 "fields": [{"name": "잔액", "value": str(balance), "inline": True}],
             })
             return
 
+        details = winning.get("lotto_details", [])
+        rows = [(line["label"], line["numbers"]) for line in details]
         draw = winning.get("draw")
-        win_num = set(draw["numbers"] if draw else winning.get("win_num", []))
+        win_num = draw["numbers"] if draw else sorted(winning.get("win_num", []))
         bonus = draw["bonus"] if draw else None
 
         if not win_num:
-            lines = [
-                f"`{line['label']}`  " + " ".join(ball(n) for n in line["numbers"])
-                for line in winning.get("lotto_details", [])
-            ]
+            image = _render(render.lotto, rows) if render else None
+            description = [f"## ⏳ {_when(next_weekday(5, 20, 35))} 추첨 예정"]
+            if not image:
+                description += [f"`{label}`  " + " ".join(ball(n) for n in nums) for label, nums in rows]
             self._send({
-                "title": f"🎱 로또 6/45 · {winning['round']}회 — 추첨 전 ⏳",
+                "title": f"🎱 로또 6/45 · {winning['round']}회 — 추첨 전",
                 "color": _COLOR_INFO,
-                "description": "\n".join(lines) or "상세 정보를 불러오지 못했습니다.",
-                "fields": [
-                    {"name": "추첨", "value": _when(next_weekday(5, 20, 35)), "inline": True},
-                    {"name": "잔액", "value": str(balance), "inline": True},
-                ],
-            })
+                "description": "\n".join(description),
+                "fields": [{"name": "잔액", "value": str(balance), "inline": True}],
+            }, image)
             return
 
-        description = []
-        if draw:
-            description.append(
-                "**당첨번호**  " + " ".join(ball(n) for n in draw["numbers"]) + f"  ➕ {ball(bonus)}"
-            )
-        elif win_num:
-            description.append("**당첨번호**  " + " ".join(ball(n) for n in sorted(win_num)))
-        description.append("")
+        ranks = [_rank_of(line["status"]) for line in details]
+        best_rank = min((r for r in ranks if r), default=0)
+        image = _render(render.lotto, rows, draw=win_num, bonus=bonus) if render else None
 
-        best_rank = 0
-        for line in winning.get("lotto_details", []):
-            rank = _rank_of(line["status"])
-            if rank and (best_rank == 0 or rank < best_rank):
-                best_rank = rank
-            nums = []
-            for n in line["numbers"]:
-                if n in win_num:
-                    nums.append(ball(n))
-                elif n == bonus and rank == 2:
-                    nums.append(f"➕`{n:02d}`")
-                else:
-                    nums.append(f"{_DIM}`{n:02d}`")
-            status = f"**{line['status']}**" if rank else line["status"]
-            description.append(f"`{line['label']}`  " + " ".join(nums) + f"  {status}")
+        description = [_headline(best_rank, winning.get("money", "-"))]
+        description.append(" · ".join(
+            f"{line['label']} **{line['status']}**" if rank else f"{line['label']} {line['status']}"
+            for line, rank in zip(details, ranks)
+        ) or "상세 정보를 불러오지 못했습니다.")
+        if not image:
+            description.append("")
+            description.append("**당첨번호**  " + " ".join(ball(n) for n in win_num) + (f"  ➕ {ball(bonus)}" if bonus else ""))
+            for label, nums in rows:
+                description.append(f"`{label}`  " + " ".join(
+                    ball(n) if n in win_num else f"{_DIM}`{n:02d}`" for n in nums
+                ))
 
-        if not winning.get("lotto_details"):
-            description.append("상세 정보를 불러오지 못했습니다.")
-
-        fields = [{"name": "당첨금", "value": winning.get("money", "-"), "inline": True}]
+        fields = []
         if draw and draw["first_winners"]:
             fields.append({
                 "name": "이번 회차 1등",
@@ -215,14 +234,12 @@ class Notification:
             })
         fields.append({"name": "잔액", "value": str(balance), "inline": True})
 
-        title = f"🎱 로또 6/45 · {winning['round']}회 결과"
-        title += " 🎉" if best_rank else " — 다음 기회에 🫠"
         self._send({
-            "title": title,
+            "title": f"🎱 로또 6/45 · {winning['round']}회 결과",
             "color": _rank_color(best_rank, small=4, mid=3),
             "description": "\n".join(description),
             "fields": fields,
-        })
+        }, image)
 
     def send_win720_winning_message(self, winning: dict) -> None:
         balance = winning.get("balance", "확인불가")
@@ -230,55 +247,45 @@ class Notification:
             self._send({
                 "title": "🎟️ 연금복권 720+ 결과",
                 "color": _COLOR_NONE,
-                "description": "이번 주 구매 내역이 없습니다.",
+                "description": "## 📭 이번 주 구매 내역 없음",
                 "fields": [{"name": "잔액", "value": str(balance), "inline": True}],
             })
             return
 
+        details = winning.get("win720_details", [])
         draw = winning.get("draw")
-        description = []
+        best_rank = min((line["rank"] for line in details if line["rank"]), default=0)
+        image = None
         if draw:
-            description.append(f"**1등**  `{draw['group']}조` {keycaps(draw['number'])}")
-            if draw.get("bonus"):
-                description.append(f"**보너스**  `각조` {keycaps(draw['bonus'])}")
+            image = _render(render.win720, [(line["group"], line["number"]) for line in details],
+                            draw_group=draw["group"], draw_number=draw["number"]) if render else None
+
+        description = [_headline(best_rank, winning.get("money", "-"))]
+        description.append(" · ".join(
+            f"{line['group']}조 **{'보너스' if line['rank'] == 8 else line['status']}**" if line["rank"]
+            else f"{line['group']}조 {line['status']}"
+            for line in details
+        ) or "상세 정보를 불러오지 못했습니다.")
+        if draw and draw.get("bonus"):
+            description.append(f"보너스 번호: 각조 **{draw['bonus']}**")
+
+        if not image:
             description.append("")
-
-        best_rank = 0
-        for line in winning.get("win720_details", []):
-            rank = line["rank"]
-            if rank and (best_rank == 0 or rank < best_rank):
-                best_rank = rank
-            number = line["number"]
             if draw:
-                matched = 0
-                for mine, drawn in zip(reversed(number), reversed(draw["number"])):
-                    if mine != drawn:
-                        break
-                    matched += 1
-                if draw.get("bonus") == number:
-                    matched = len(number)
-            else:
-                matched = _WIN720_TAIL_MATCH.get(rank, len(number) if rank == 8 else 0)
-            split = len(number) - matched
-            digits = " ".join(f"`{d}`" for d in number[:split]) + " " + keycaps(number[split:])
-            status = "보너스" if rank == 8 else line["status"]
-            status = f"**{status}**" if rank else status
-            description.append(f"`{line['group']}조`  {digits.strip()}  {status}")
+                description.append(f"**1등**  `{draw['group']}조` {keycaps(draw['number'])}")
+            for line in details:
+                number = line["number"]
+                matched = _WIN720_TAIL_MATCH.get(line["rank"], len(number) if line["rank"] == 8 else 0)
+                split = len(number) - matched
+                digits = " ".join(f"`{d}`" for d in number[:split]) + " " + keycaps(number[split:])
+                description.append(f"`{line['group']}조`  {digits.strip()}")
 
-        if not winning.get("win720_details"):
-            description.append("상세 정보를 불러오지 못했습니다.")
-
-        title = f"🎟️ 연금복권 720+ · {winning['round']}회 결과"
-        title += " 🎉" if best_rank else " — 다음 기회에 🫠"
         self._send({
-            "title": title,
+            "title": f"🎟️ 연금복권 720+ · {winning['round']}회 결과",
             "color": _rank_color(best_rank, small=5, mid=3),
             "description": "\n".join(description),
-            "fields": [
-                {"name": "당첨금", "value": winning.get("money", "-"), "inline": True},
-                {"name": "잔액", "value": str(balance), "inline": True},
-            ],
-        })
+            "fields": [{"name": "잔액", "value": str(balance), "inline": True}],
+        }, image)
 
     # ── 오류 ────────────────────────────────────────────
 
@@ -286,12 +293,12 @@ class Notification:
         self._send({
             "title": f"⚠️ {title}",
             "color": _COLOR_ERROR,
-            "description": f"```\n{type(error).__name__}: {str(error)[:1500]}\n```",
+            "description": f"## ❌ 실패\n```\n{type(error).__name__}: {str(error)[:1500]}\n```",
         })
 
     # ── 전송 ────────────────────────────────────────────
 
-    def _send(self, embed: dict) -> None:
+    def _send(self, embed: dict, image: bytes = None) -> None:
         embed.setdefault("footer", {"text": "lottery-bot"})
         embed.setdefault("timestamp", datetime.datetime.now(datetime.timezone.utc).isoformat())
 
@@ -300,12 +307,19 @@ class Notification:
             return
 
         for url in self.webhook_urls:
-            if "hooks.slack.com" in url:
-                payload = {"text": self._to_text(embed).replace("**", "*")}
-            else:
-                payload = {"embeds": [embed]}
             try:
-                res = requests.post(url, json=payload, timeout=10)
+                if "hooks.slack.com" in url:
+                    res = requests.post(url, json={"text": self._to_text(embed).replace("**", "*")}, timeout=10)
+                elif image:
+                    with_image = dict(embed, image={"url": f"attachment://{_IMAGE_NAME}"})
+                    res = requests.post(
+                        url,
+                        data={"payload_json": json.dumps({"embeds": [with_image]})},
+                        files={"files[0]": (_IMAGE_NAME, image, "image/png")},
+                        timeout=20,
+                    )
+                else:
+                    res = requests.post(url, json={"embeds": [embed]}, timeout=10)
                 res.raise_for_status()
             except requests.RequestException as e:
                 self.failed = True
@@ -313,6 +327,6 @@ class Notification:
 
     @staticmethod
     def _to_text(embed: dict) -> str:
-        lines = [f"**{embed['title']}**", embed.get("description", "")]
+        lines = [f"**{embed['title']}**", embed.get("description", "").replace("## ", "")]
         lines += [f"{f['name']}: {f['value']}" for f in embed.get("fields", [])]
         return "\n".join(line for line in lines if line)
